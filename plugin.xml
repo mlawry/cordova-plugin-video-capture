@@ -67,7 +67,7 @@ xmlns:rim="http://www.blackberry.com/ns/widgets"
     <platform name="ios">    
         <config-file target="config.xml" parent="/*">
             <feature name="VideoCapture">
-                <param name="ios-package" value="VidCapture" /> 
+                <param name="ios-package" value="CDVCapture" /> 
             </feature>
         </config-file>
         <header-file src="src/ios/CDVCapture.h" />

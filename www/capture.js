@@ -19,37 +19,37 @@
  *
 */
 
-var exec = require('cordova/exec'),
-    MediaFile = require('./MediaFile');
+var exec = require('cordova/exec');
 
 /**
  * Launches a capture of different types.
  *
- * @param (DOMString} type
+ * @param (DOMString} action
  * @param {Function} successCB
  * @param {Function} errorCB
  * @param {CaptureVideoOptions} options
  */
-function _capture(type, successCallback, errorCallback, options) {
-    var win = function(pluginResult) {
-        var mediaFiles = [];
-        var i;
-        for (i = 0; i < pluginResult.length; i++) {
-            var mediaFile = new MediaFile();
-            mediaFile.name = pluginResult[i].name;
+function _capture(action, successCallback, errorCallback, options) {
+	var win = function(pluginResult) {
+        //var mediaFiles = [];
+        //var i;
+        //for (i = 0; i < pluginResult.length; i++) {
+        //    var mediaFile = new MediaFile();
+        //    mediaFile.name = pluginResult[i].name;
 
-            // Backwards compatibility
-            mediaFile.localURL = pluginResult[i].localURL || pluginResult[i].fullPath;
-            mediaFile.fullPath = pluginResult[i].fullPath;
-            mediaFile.type = pluginResult[i].type;
-            mediaFile.lastModifiedDate = pluginResult[i].lastModifiedDate;
-            mediaFile.size = pluginResult[i].size;
-            mediaFiles.push(mediaFile);
-        }
-        successCallback(mediaFiles);
+        //    // Backwards compatibility
+        //    mediaFile.localURL = pluginResult[i].localURL || pluginResult[i].fullPath;
+        //    mediaFile.fullPath = pluginResult[i].fullPath;
+        //    mediaFile.type = pluginResult[i].type;
+        //    mediaFile.lastModifiedDate = pluginResult[i].lastModifiedDate;
+        //    mediaFile.size = pluginResult[i].size;
+        //    mediaFiles.push(mediaFile);
+        //}
+        successCallback(pluginResult);
     };
-    exec(win, errorCallback, "Capture", type, [options]);
+    exec(win, errorCallback, "VideoCapture", action, [options]);
 }
+
 /**
  * The Capture interface exposes an interface to the camera and microphone of the hosting device.
  */
@@ -89,8 +89,8 @@ Capture.prototype.captureImage = function(successCallback, errorCallback, option
  * @param {CaptureVideoOptions} options
  */
 Capture.prototype.captureVideo = function(successCallback, errorCallback, options){
-    console.log("captureVideo called");
-	//_capture("captureVideo", successCallback, errorCallback, options);
+    //console.log("captureVideo called");
+	_capture("captureVideo", successCallback, errorCallback, options);
 };
 
 
