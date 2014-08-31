@@ -22,7 +22,9 @@
 var exec = require('cordova/exec');
 
 /**
- * Launches a capture of different types.
+ * Launches a capture of different types. Because exec() call back runs in the
+ * event dispatching thread, we have to return ASAP instead of blocking the thread,
+ * so use setTimeout to call success/error callbacks later.
  *
  * @param (DOMString} action
  * @param {Function} successCB
@@ -30,24 +32,17 @@ var exec = require('cordova/exec');
  * @param {CaptureVideoOptions} options
  */
 function _capture(action, successCallback, errorCallback, options) {
-	var win = function(pluginResult) {
-        //var mediaFiles = [];
-        //var i;
-        //for (i = 0; i < pluginResult.length; i++) {
-        //    var mediaFile = new MediaFile();
-        //    mediaFile.name = pluginResult[i].name;
-
-        //    // Backwards compatibility
-        //    mediaFile.localURL = pluginResult[i].localURL || pluginResult[i].fullPath;
-        //    mediaFile.fullPath = pluginResult[i].fullPath;
-        //    mediaFile.type = pluginResult[i].type;
-        //    mediaFile.lastModifiedDate = pluginResult[i].lastModifiedDate;
-        //    mediaFile.size = pluginResult[i].size;
-        //    mediaFiles.push(mediaFile);
-        //}
-        successCallback(pluginResult);
+	var pass = function (pluginResult) {
+        window.setTimeout(function () {
+	        successCallback(pluginResult);
+		}, 100);
     };
-    exec(win, errorCallback, "VideoCapture", action, [options]);
+	var fail = function (error) {
+        window.setTimeout(function () {
+	        errorCallback(error);
+		}, 100);
+	};
+    exec(pass, fail, "VideoCapture", action, [options]);
 }
 
 /**
@@ -89,7 +84,6 @@ Capture.prototype.captureImage = function(successCallback, errorCallback, option
  * @param {CaptureVideoOptions} options
  */
 Capture.prototype.captureVideo = function(successCallback, errorCallback, options){
-    //console.log("captureVideo called");
 	_capture("captureVideo", successCallback, errorCallback, options);
 };
 

@@ -214,60 +214,118 @@
         options = [NSDictionary dictionary];
     }
 
-    // options could contain limit, duration and mode
-    // taking more than one video (limit) is only supported if provide own controls via cameraOverlayView property
-    NSNumber* duration = [options objectForKey:@"duration"];
-    NSString* mediaType = nil;
-
-    if ([UIImagePickerController isSourceTypeAvailable:UIImagePickerControllerSourceTypeCamera]) {
-        // there is a camera, it is available, make sure it can do movies
-        pickerController = [[CDVImagePicker alloc] init];
-
-        NSArray* types = nil;
-        if ([UIImagePickerController respondsToSelector:@selector(availableMediaTypesForSourceType:)]) {
-            types = [UIImagePickerController availableMediaTypesForSourceType:UIImagePickerControllerSourceTypeCamera];
-            // NSLog(@"MediaTypes: %@", [types description]);
-
-            if ([types containsObject:(NSString*)kUTTypeMovie]) {
-                mediaType = (NSString*)kUTTypeMovie;
-            } else if ([types containsObject:(NSString*)kUTTypeVideo]) {
-                mediaType = (NSString*)kUTTypeVideo;
-            }
-        }
-    }
-    if (!mediaType) {
-        // don't have video camera return error
-        NSLog(@"Capture.captureVideo: video mode not available.");
-        CDVPluginResult* result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageToErrorObject:CAPTURE_NOT_SUPPORTED];
+    NSNumber* duration = [options objectForKey:@"maxDuration"];
+    //NSString* fileName = [options objectForKey:@"fileName"];
+    
+    // If return value is NO then errMsg is a NSString.
+    NSString* errMsg;
+    BOOL ok;
+    ok = [[self class] captureFromViewController:[self viewController]
+                                   usingDelegate:self
+                                     maxDuration:duration
+                                withErrorMessage:&errMsg];
+    if (!ok)
+    {
+        CDVPluginResult* result = nil;
+        result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
+                                   messageAsString:errMsg];
         [self.commandDelegate sendPluginResult:result callbackId:callbackId];
-        pickerController = nil;
-    } else {
-        pickerController.delegate = self;
-        pickerController.sourceType = UIImagePickerControllerSourceTypeCamera;
-        pickerController.allowsEditing = NO;
-        // iOS 3.0
-        pickerController.mediaTypes = [NSArray arrayWithObjects:mediaType, nil];
-
-        if ([mediaType isEqualToString:(NSString*)kUTTypeMovie]){
-            if (duration) {
-                pickerController.videoMaximumDuration = [duration doubleValue];
-            }
-            //NSLog(@"pickerController.videoMaximumDuration = %f", pickerController.videoMaximumDuration);
-        }
-
-        // iOS 4.0
-        if ([pickerController respondsToSelector:@selector(cameraCaptureMode)]) {
-            pickerController.cameraCaptureMode = UIImagePickerControllerCameraCaptureModeVideo;
-            // pickerController.videoQuality = UIImagePickerControllerQualityTypeHigh;
-            // pickerController.cameraDevice = UIImagePickerControllerCameraDeviceRear;
-            // pickerController.cameraFlashMode = UIImagePickerControllerCameraFlashModeAuto;
-        }
-        // CDVImagePicker specific property
-        pickerController.callbackId = callbackId;
-
-        [self.viewController presentViewController:pickerController animated:YES completion:nil];
     }
 }
+
++ (BOOL)captureFromViewController:(UIViewController*)controller
+                    usingDelegate:(id <UIImagePickerControllerDelegate, UINavigationControllerDelegate>)delegate
+                      maxDuration:(NSNumber*)durationInSec
+                 withErrorMessage:(NSString**)pStr
+{
+    if ((delegate == nil) || (controller == nil))
+    {
+        *pStr = @"Invalid arguments.";
+        return NO;
+    }
+    *pStr = nil;
+
+    BOOL isAvail = [UIImagePickerController isSourceTypeAvailable:UIImagePickerControllerSourceTypeCamera];
+    if (!isAvail)
+    {
+        *pStr = @"The camera device is currently busy and not available for use.";
+        return NO;
+    }
+    
+    UIImagePickerController* cameraUI = [[UIImagePickerController alloc] init];
+    cameraUI.sourceType = UIImagePickerControllerSourceTypeCamera;
+    
+    // Make sure movie capture is available. Require movie capture for now.
+    NSArray* mediaTypes = [UIImagePickerController availableMediaTypesForSourceType:UIImagePickerControllerSourceTypeCamera];
+    
+    NSEnumerator* itr = [mediaTypes objectEnumerator];
+    BOOL isFound = NO;
+    id anObject;
+    while (anObject = [itr nextObject])
+    {
+        if ([anObject isEqual:(NSString*)kUTTypeMovie])
+        {
+            isFound = YES;
+            break;
+        }
+    }
+    if (!isFound)
+    {
+        *pStr = @"The camera device cannot be used to take videos or movies.";
+        return NO;
+    }
+    
+    cameraUI.mediaTypes = [NSArray arrayWithObject:(NSString*)kUTTypeMovie];
+    
+    // Hides the controls for moving & scaling pictures, or for
+    // trimming movies. To instead show the controls, use YES.
+    cameraUI.allowsEditing = YES;
+    
+    // On iPad, if you specify a source type of UIImagePickerControllerSourceTypeCamera,
+    // you can present the image picker modally (full-screen) or by using a popover. However,
+    // Apple recommends that you present the camera interface only full-screen.
+    cameraUI.modalPresentationStyle = UIModalPresentationFullScreen;
+    
+    cameraUI.videoMaximumDuration = [durationInSec integerValue];
+    cameraUI.delegate = delegate;
+    
+    [controller presentViewController:cameraUI animated:YES completion:NULL];
+    return YES;
+}
+
+#pragma mark - UIImagePickerControllerDelegate
+
+- (void)imagePickerControllerDidCancel:(UIImagePickerController *)picker
+{
+    NSLog(@"Camera dismissed.");
+    [picker dismissViewControllerAnimated:YES completion:NULL];
+}
+
+- (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary *)info
+{
+    NSLog(@"Camera picked media");
+    [picker dismissViewControllerAnimated:YES completion:NULL];
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 - (CDVPluginResult*)processVideo:(NSString*)moviePath forCallbackId:(NSString*)callbackId
 {
@@ -466,13 +524,13 @@
 
     return fileDict;
 }
-
+/*
 - (void)imagePickerController:(UIImagePickerController*)picker didFinishPickingImage:(UIImage*)image editingInfo:(NSDictionary*)editingInfo
 {
     // older api calls new one
     [self imagePickerController:picker didFinishPickingMediaWithInfo:editingInfo];
 }
-
+*/
 /* Called when image/movie is finished recording.
  * Calls success or error code as appropriate
  * if successful, result  contains an array (with just one entry since can only get one image unless build own camera UI) of MediaFile object representing the image
@@ -482,6 +540,7 @@
  *      lastModifiedDate
  *      size
  */
+/*
 - (void)imagePickerController:(UIImagePickerController*)picker didFinishPickingMediaWithInfo:(NSDictionary*)info
 {
     CDVImagePicker* cameraPicker = (CDVImagePicker*)picker;
@@ -530,7 +589,7 @@
     [self.commandDelegate sendPluginResult:result callbackId:callbackId];
     pickerController = nil;
 }
-
+*/
 @end
 
 @implementation CDVAudioNavigationController
