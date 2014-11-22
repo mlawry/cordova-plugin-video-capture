@@ -44,12 +44,15 @@ typedef NSUInteger CDVCaptureError;
 
 @end
 
-@interface CDVCapture : CDVPlugin <UIImagePickerControllerDelegate, UINavigationControllerDelegate>
+@interface CDVCapture : CDVPlugin <UIImagePickerControllerDelegate, UINavigationControllerDelegate, UIPopoverControllerDelegate>
 {
     CDVImagePicker* pickerController;
     BOOL inUse;
 }
 @property BOOL inUse;
+@property (nonatomic, retain) UIPopoverController* popoverController; //RIDBC
+@property (nonatomic, retain) NSString* captureCallbackId; //RIDBC
+@property (nonatomic, retain) NSString* captureFileName; //RIDBC
 - (void)captureAudio:(CDVInvokedUrlCommand*)command;
 - (void)captureImage:(CDVInvokedUrlCommand*)command;
 - (CDVPluginResult*)processImage:(UIImage*)image type:(NSString*)mimeType forCallbackId:(NSString*)callbackId;

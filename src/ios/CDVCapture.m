@@ -114,6 +114,8 @@
     }
 }
 
+// Changed this method from capturedImage to delete a file (which would be the
+// temporarily saved captured video file that user no longer wants to save).
 - (void)captureImage:(CDVInvokedUrlCommand*)command
 {
     NSString* callbackId = command.callbackId;
@@ -123,38 +125,27 @@
         options = [NSDictionary dictionary];
     }
 
-    // options could contain limit and mode neither of which are supported at this time
-    // taking more than one picture (limit) is only supported if provide own controls via cameraOverlayView property
-    // can support mode in OS
-
-    if (![UIImagePickerController isSourceTypeAvailable:UIImagePickerControllerSourceTypeCamera]) {
-        NSLog(@"Capture.imageCapture: camera not available.");
-        CDVPluginResult* result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageToErrorObject:CAPTURE_NOT_SUPPORTED];
-        [self.commandDelegate sendPluginResult:result callbackId:callbackId];
-    } else {
-        if (pickerController == nil) {
-            pickerController = [[CDVImagePicker alloc] init];
+    NSString* optFilePath = [options objectForKey:@"filePath"];
+    if (optFilePath)
+    {
+        // Delete the file.
+        NSFileManager* manager = [NSFileManager defaultManager];
+        BOOL ok = [manager removeItemAtPath:optFilePath error:nil];
+        if (ok)
+        {
+            // File removed successfully.
+            CDVPluginResult* result = nil;
+            result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
+            [self.commandDelegate sendPluginResult:result callbackId:callbackId];
+            return;
         }
-
-        pickerController.delegate = self;
-        pickerController.sourceType = UIImagePickerControllerSourceTypeCamera;
-        pickerController.allowsEditing = NO;
-        if ([pickerController respondsToSelector:@selector(mediaTypes)]) {
-            // iOS 3.0
-            pickerController.mediaTypes = [NSArray arrayWithObjects:(NSString*)kUTTypeImage, nil];
-        }
-
-        /*if ([pickerController respondsToSelector:@selector(cameraCaptureMode)]){
-            // iOS 4.0
-            pickerController.cameraCaptureMode = UIImagePickerControllerCameraCaptureModePhoto;
-            pickerController.cameraDevice = UIImagePickerControllerCameraDeviceRear;
-            pickerController.cameraFlashMode = UIImagePickerControllerCameraFlashModeAuto;
-        }*/
-        // CDVImagePicker specific property
-        pickerController.callbackId = callbackId;
-
-        [self.viewController presentViewController:pickerController animated:YES completion:nil];
     }
+
+    // Getting here means no file to remove or did not manage to remove file.
+    CDVPluginResult* result = nil;
+    result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR];
+    [self.commandDelegate sendPluginResult:result callbackId:callbackId];
+    return;
 }
 
 /* Process a still image from the camera.
@@ -214,15 +205,17 @@
         options = [NSDictionary dictionary];
     }
 
-    NSNumber* duration = [options objectForKey:@"maxDuration"];
-    //NSString* fileName = [options objectForKey:@"fileName"];
+    NSString* optSource = [options objectForKey:@"source"];
+    NSNumber* optDuration = [options objectForKey:@"maxDuration"];
+    NSString* optFileName = [options objectForKey:@"fileName"];
     
     // If return value is NO then errMsg is a NSString.
     NSString* errMsg;
     BOOL ok;
     ok = [[self class] captureFromViewController:[self viewController]
                                    usingDelegate:self
-                                     maxDuration:duration
+                                      sourceType:optSource
+                                     maxDuration:optDuration
                                 withErrorMessage:&errMsg];
     if (!ok)
     {
@@ -230,33 +223,59 @@
         result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
                                    messageAsString:errMsg];
         [self.commandDelegate sendPluginResult:result callbackId:callbackId];
+        self.captureCallbackId = nil;
+    }
+    else
+    {
+        // Capture will proceed, save callbackId in order to sendPluginResult later.
+        self.captureCallbackId = callbackId;
+        self.captureFileName = optFileName;
     }
 }
 
-+ (BOOL)captureFromViewController:(UIViewController*)controller
-                    usingDelegate:(id <UIImagePickerControllerDelegate, UINavigationControllerDelegate>)delegate
+/**
+ delegate must implement the following protocols:
+ + UIImagePickerControllerDelegate
+ + UINavigationControllerDelegate
+ + UIPopoverControllerDelegate
+ and implement a setPopoverController: method that retains the popover used (if any).
+ */
++ (BOOL)captureFromViewController:(UIViewController*)parentController
+                    usingDelegate:(id)delegate
+                       sourceType:(NSString*)whatSource
                       maxDuration:(NSNumber*)durationInSec
                  withErrorMessage:(NSString**)pStr
 {
-    if ((delegate == nil) || (controller == nil))
+    if ((delegate == nil) || (parentController == nil))
     {
         *pStr = @"Invalid arguments.";
         return NO;
     }
     *pStr = nil;
 
-    BOOL isAvail = [UIImagePickerController isSourceTypeAvailable:UIImagePickerControllerSourceTypeCamera];
+    // Assign appropriate source type.
+    UIImagePickerControllerSourceType mySourceType;
+    if ([@"camera" isEqualToString:whatSource])
+    {
+        mySourceType = UIImagePickerControllerSourceTypeCamera;
+    }
+    else
+    {
+        mySourceType = UIImagePickerControllerSourceTypePhotoLibrary;
+    }
+
+    BOOL isAvail = [UIImagePickerController isSourceTypeAvailable:mySourceType];
     if (!isAvail)
     {
-        *pStr = @"The camera device is currently busy and not available for use.";
+        *pStr = [NSString stringWithFormat:@"The %@ device is currently busy and not available for use.", whatSource];
         return NO;
     }
     
     UIImagePickerController* cameraUI = [[UIImagePickerController alloc] init];
-    cameraUI.sourceType = UIImagePickerControllerSourceTypeCamera;
+    cameraUI.sourceType = mySourceType;
     
     // Make sure movie capture is available. Require movie capture for now.
-    NSArray* mediaTypes = [UIImagePickerController availableMediaTypesForSourceType:UIImagePickerControllerSourceTypeCamera];
+    NSArray* mediaTypes = [UIImagePickerController availableMediaTypesForSourceType:mySourceType];
     
     NSEnumerator* itr = [mediaTypes objectEnumerator];
     BOOL isFound = NO;
@@ -271,11 +290,12 @@
     }
     if (!isFound)
     {
-        *pStr = @"The camera device cannot be used to take videos or movies.";
+        *pStr = [NSString stringWithFormat:@"The %@ device cannot be used to take videos.", whatSource];
         return NO;
     }
     
     cameraUI.mediaTypes = [NSArray arrayWithObject:(NSString*)kUTTypeMovie];
+    cameraUI.videoMaximumDuration = [durationInSec integerValue];
     
     // Hides the controls for moving & scaling pictures, or for
     // trimming movies. To instead show the controls, use YES.
@@ -283,13 +303,31 @@
     
     // On iPad, if you specify a source type of UIImagePickerControllerSourceTypeCamera,
     // you can present the image picker modally (full-screen) or by using a popover. However,
-    // Apple recommends that you present the camera interface only full-screen.
+    // Apple recommends that you present the camera interface only full-screen. However, when the
+    // source type is PhotoLibrary or PhotoAlbum, a popover must be used. On iPhone, always
+    // use full screen no matter what the source type is.
     cameraUI.modalPresentationStyle = UIModalPresentationFullScreen;
-    
-    cameraUI.videoMaximumDuration = [durationInSec integerValue];
     cameraUI.delegate = delegate;
     
-    [controller presentViewController:cameraUI animated:YES completion:NULL];
+    if (mySourceType != UIImagePickerControllerSourceTypeCamera && [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad)
+    {
+        UIPopoverController* pop = [[UIPopoverController alloc] initWithContentViewController:cameraUI];
+        pop.delegate = delegate;
+        [delegate setPopoverController:pop]; // This retains the popover so it doesn't get dealloc.
+        
+        CGRect anchor = [[parentController view] bounds];
+        anchor.origin = CGPointMake(0, 0);
+        anchor.size.height = 100;
+        
+        [pop presentPopoverFromRect:anchor
+                             inView:[parentController view]
+           permittedArrowDirections:UIPopoverArrowDirectionAny
+                           animated:YES];
+    }
+    else
+    {
+        [parentController presentViewController:cameraUI animated:YES completion:NULL];
+    }
     return YES;
 }
 
@@ -298,20 +336,137 @@
 - (void)imagePickerControllerDidCancel:(UIImagePickerController *)picker
 {
     NSLog(@"Camera dismissed.");
-    [picker dismissViewControllerAnimated:YES completion:NULL];
+    
+    // Clean up.
+    if (picker.sourceType != UIImagePickerControllerSourceTypeCamera && [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad)
+    {
+        // picker's delegate must be the same as popover's delegate.
+        id delegate = picker.delegate;
+        UIPopoverController* pop = [delegate popoverController];
+        [pop dismissPopoverAnimated:YES];
+        [delegate setPopoverController:nil];
+    }
+    else
+    {
+        [picker dismissViewControllerAnimated:YES completion:NULL];
+    }
+    
+    // Inform JS user cancelled.
+    id dict = [NSDictionary dictionaryWithObject:[NSNumber numberWithBool:YES]
+                                          forKey:@"isCancelled"];
+    if (self.captureCallbackId)
+    {
+        CDVPluginResult* result = nil;
+        result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK
+                               messageAsDictionary:dict];
+        [self.commandDelegate sendPluginResult:result callbackId:self.captureCallbackId];
+        self.captureCallbackId = nil;
+    }
 }
 
 - (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary *)info
 {
-    NSLog(@"Camera picked media");
-    [picker dismissViewControllerAnimated:YES completion:NULL];
+    CDVPluginResult* result = nil;
+    NSURL* fsUrl = (NSURL*)[info objectForKey:UIImagePickerControllerMediaURL];
+
+    if (self.captureFileName)
+    {
+        NSFileManager* fileManager = [NSFileManager defaultManager];
+
+        // Find the documents folder.
+        NSString *docsFolder = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) objectAtIndex: 0];
+        if ([fileManager fileExistsAtPath:docsFolder])
+        {
+            // Copy the captured video to Document directory. The target file path will be something like
+            // ../App/Documents/{captureFileName}.mov
+            NSString* targetFilePath = [docsFolder stringByAppendingPathComponent:[[self captureFileName] stringByAppendingPathExtension:@"mov"]];
+            if ([fileManager fileExistsAtPath:targetFilePath])
+            {
+                // ALWAYS overwrite the content.
+                [fileManager removeItemAtPath:targetFilePath error:NULL];
+            }
+        
+            NSError* error;
+            if ([fileManager copyItemAtPath:[fsUrl path] toPath:targetFilePath error:&error])
+            {
+                // Successful.
+                id dict = [NSDictionary dictionaryWithObjectsAndKeys:
+                    [NSNumber numberWithBool:NO], @"isCancelled",
+                    targetFilePath, @"videoFilePath",
+                    nil];
+                result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK
+                                       messageAsDictionary:dict];
+            }
+            else
+            {
+                NSString* msg = [NSString stringWithFormat:@"Failed to copy video to document folder. %@ %@",
+                                                           [error localizedDescription], [error localizedFailureReason]];
+                result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
+                                           messageAsString:msg];
+            }
+        }
+        else
+        {
+            result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
+                                       messageAsString:@"The App's document directory doesn't exist."];
+        }
+        
+        // Set it to nil because we don't need it anymore.
+        self.captureFileName = nil;
+    }
+    // else do nothing because self.captureFileName is nil.
+
+    // Clean up.
+    if (picker.sourceType != UIImagePickerControllerSourceTypeCamera && [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad)
+    {
+        // picker's delegate must be the same as popover's delegate.
+        id delegate = picker.delegate;
+        UIPopoverController* pop = [delegate popoverController];
+        [pop dismissPopoverAnimated:YES];
+        [delegate setPopoverController:nil];
+    }
+    else
+    {
+        [picker dismissViewControllerAnimated:YES completion:NULL];
+    }
+    
+    // Send result to JS.
+    if (self.captureCallbackId)
+    {
+        [self.commandDelegate sendPluginResult:result callbackId:self.captureCallbackId];
+        self.captureCallbackId = nil;
+    }
 }
 
+- (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingImage:(UIImage *)image editingInfo:(NSDictionary *)editingInfo
+{
+    // Deprecated.
+}
 
+#pragma mark - UIPopoverControllerDelegate
 
-
-
-
+- (void)popoverControllerDidDismissPopover:(UIPopoverController *)popoverController
+{
+    // This is called when user dismisses the popover by tapping on an area outside of the popover.
+    // This is not called when the popover is programmatically dismissed.
+    NSLog(@"Camera POPOVER dismissed.");
+    
+    // Need to release popover via its delegate.
+    id delegate = popoverController.delegate;
+    [delegate setPopoverController:nil];
+    
+    // Inform JS user cancelled.
+    id dict = [NSDictionary dictionaryWithObject:[NSNumber numberWithBool:YES]
+                                          forKey:@"isCancelled"];
+    if (self.captureCallbackId)
+    {
+        CDVPluginResult* result = nil;
+        result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK
+                               messageAsDictionary:dict];
+        [self.commandDelegate sendPluginResult:result callbackId:self.captureCallbackId];
+        self.captureCallbackId = nil;
+    }
+}
 
 
 
